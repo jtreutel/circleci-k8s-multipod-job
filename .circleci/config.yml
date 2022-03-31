@@ -92,7 +92,6 @@ jobs:
       # Install utilities if necessaryzs
       - aws-cli/setup:
           profile-name: default
-          override-installed: true #force profile creation
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
       # Clean up deployed resources
@@ -117,6 +116,7 @@ workflows:
               app: [angular, nginx]
           requires:
             - checkout-code
+          context: kubeconfig       
       - execute-tests:
           requires:
             - deploy-apps-to-cluster
