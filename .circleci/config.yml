@@ -32,7 +32,11 @@ jobs:
           root: .
           paths:
           - .
-  testing-deploy-pod:
+  deploy-apps-to-cluster:
+    parameters:
+      # Name of deployment and service that will be created
+      app: 
+        type: string
     executor: k8s-runner
     steps:
       - attach_workspace:
@@ -43,28 +47,29 @@ jobs:
           profile-name: default
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
-      # Deploy Angular app k8s deployment and service
+      # Deploy app k8s deployment and service
       - kubernetes/create-or-update-resource:
           get-rollout-status: false
-          resource-file-path: deployments/angular.yml
-          resource-name: deployment/angular-app
+          resource-file-path: deployments/<< parameters.app >>.yml
+          resource-name: deployment/<< parameters.app >>-app
           show-kubectl-command: true
       - kubernetes/create-or-update-resource:
           get-rollout-status: false
-          resource-file-path: services/angular.yml
-          resource-name: service/angular-app
+          resource-file-path: services/<< parameters.app >>.yml
+          resource-name: service/<< parameters.app >>-app
           show-kubectl-command: true
       # Get port and IP of service and store in BASH_ENV for use in next steps
-      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.app >>-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.app >>-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
       # Wait for service to be available
       - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
       # Save service IP to local file and workspace cache
-      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-angular.txt
+      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-<< parameters.app >>.txt
       - persist_to_workspace:
           root: .
           paths:
           - svc_ips/*
-  testing-execute-test:
+
+  execute-tests:
     executor: k8s-runner
     steps:
       - attach_workspace:
@@ -77,7 +82,11 @@ jobs:
           path: test_results/angular.txt
           destination: curl-angular-results.txt
 
-  testing-delete-pod:
+  delete-apps-from-cluster:
+    parameters:
+      # Name of deployment and service that will be deleted
+      app: 
+        type: string
     executor: k8s-runner
     steps:
       # Install utilities if necessaryzs
@@ -88,12 +97,12 @@ jobs:
       # Clean up deployed resources
       - kubernetes/delete-resource:
           now: true
-          resource-names: angular-app
+          resource-names: << parameters.app >>-app
           resource-types: deployments
           wait: true
       - kubernetes/delete-resource:
           now: true
-          resource-names: angular-app
+          resource-names: << parameters.app >>-app
           resource-types: service
           wait: true
 
@@ -101,15 +110,19 @@ workflows:
   testing:
     jobs:
       - checkout-code
-      - testing-deploy-pod:
+      - deploy-apps-to-cluster:
+          matrix:
+            parameters:
+              app: [angular, nginx]
           requires:
             - checkout-code
-          context: kubeconfig
-      - testing-execute-test:
+      - execute-tests:
           requires:
-            - testing-deploy-pod
-          context: kubeconfig
-      - testing-delete-pod:
+            - deploy-apps-to-cluster
+      - delete-apps-from-cluster:
+          matrix:
+            parameters:
+              app: [angular, nginx]
           requires:
-            - testing-execute-test
+            - execute-tests
           context: kubeconfig       
