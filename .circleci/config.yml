@@ -57,7 +57,7 @@ jobs:
       # Wait for service to be available
       - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
       # Save service IP to local file and workspace cache
-      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-angular.txt && sleep 1200
+      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-angular.txt
       - persist_to_workspace:
           root: .
           paths:
