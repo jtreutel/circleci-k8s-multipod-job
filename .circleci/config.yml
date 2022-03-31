@@ -9,9 +9,16 @@ executors:
     machine: true
     resource_class: jtreutel/runner-test-k8s-2022
 
-#commands:
-#  get-service-ip-and-port:
-#zs    run: $(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')
+commands:
+  install-aws-iam-authenticator:
+    steps:
+      - run: |
+          if [ ! -f "$HOME/bin/aws-iam-authenticator" ]; then \
+            curl -o aws-iam-authenticator https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.2/2021-07-05/bin/linux/amd64/aws-iam-authenticator && \
+            chmod +x ./aws-iam-authenticator && \
+            mv ./aws-iam-authenticator $HOME/bin/aws-iam-authenticator; \
+          fi
+
 
 jobs:
   checkout-code:
@@ -30,6 +37,7 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      - install-aws-iam-authenticator #Needed to interact with EKS
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
       - kubernetes/create-or-update-resource:
@@ -56,6 +64,22 @@ jobs:
       - store_artifacts:
           path: test_results/curl.txt
           destination: curl-results
+
+  testing-delete-pod:
+    executor: k8s-runner
+    steps:
+      - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
+      - kubernetes/delete-resource:
+          now: true
+          resource-names: angular-app
+          resource-types: deployments
+          wait: true
+      - kubernetes/delete-resource:
+          now: true
+          resource-names: angular-app
+          resource-types: service
+          wait: true
 
 workflows:
   testing:
