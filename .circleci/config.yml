@@ -37,11 +37,13 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      # Install utilities if necessary
       - install-dockerize
       - aws-cli/setup:
           profile-name: default
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
+      # Deploy Angular app k8s deployment and service
       - kubernetes/create-or-update-resource:
           get-rollout-status: false
           resource-file-path: deployments/angular.yml
@@ -68,16 +70,22 @@ jobs:
       - attach_workspace:
           at: .
       - run: mkdir test_results
+      # Run a "test" that gets contents of Angular app running on recently deployed pod
       - run: curl "$(cat svc_ips/svc-angular.txt)" | tee test_results/angular.txt
+      # Upload test result to CircleCI UI
       - store_artifacts:
           path: test_results/angular.txt
-          destination: curl-angular-results
+          destination: curl-angular-results.txt
 
   testing-delete-pod:
     executor: k8s-runner
     steps:
+      # Install utilities if necessaryzs
+      - aws-cli/setup:
+          profile-name: default
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
+      # Clean up deployed resources
       - kubernetes/delete-resource:
           now: true
           resource-names: angular-app
