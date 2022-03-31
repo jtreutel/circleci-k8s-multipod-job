@@ -92,6 +92,7 @@ jobs:
       # Install utilities if necessaryzs
       - aws-cli/setup:
           profile-name: default
+          override-installed: true #force profile creation
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
       # Clean up deployed resources
