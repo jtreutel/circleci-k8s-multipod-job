@@ -53,19 +53,25 @@ jobs:
           resource-name: service/angular-app
           show-kubectl-command: true
       # Get port and IP of service
-      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+      - run: export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')"
       # Wait for service to be available
       - run: dockerize -wait tcp://$SVC_PORT_AND_IP -timeout 1m
+      # Save service IP to local file and workspace cache
+      - run: mdir -p svc_ips && echo $SVC_PORT_AND_IP > svc-angular.txt
+      - persist_to_workspace:
+          root: .
+          paths:
+          - svc_ips/*
   testing-execute-test:
     executor: k8s-runner
     steps:
       - attach_workspace:
           at: .
       - run: mkdir test_results
-      - run: curl $SVC_PORT_AND_IP | tee test_results/curl.txt
+      - run: curl "$(cat svc_ips/svc-angular.txt)" | tee test_results/angular.txt
       - store_artifacts:
-          path: test_results/curl.txt
-          destination: curl-results
+          path: test_results/angular.txt
+          destination: curl-angular-results
 
   testing-delete-pod:
     executor: k8s-runner
