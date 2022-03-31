@@ -31,6 +31,7 @@ jobs:
       - attach_workspace:
           at: .
       - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
       - kubernetes/create-or-update-resource:
           get-rollout-status: true
           resource-file-path: deployments/angular.yml
@@ -60,5 +61,11 @@ workflows:
   testing:
     jobs:
       - checkout-code
-      - testing-deploy-pod
-      - testing-execute-test
+      - testing-deploy-pod:
+          requires:
+            - checkout-code
+          context: kubeconfig
+      - testing-execute-test:
+          requires:
+            - testing-deploy-pod
+          context: kubeconfig
