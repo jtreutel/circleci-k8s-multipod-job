@@ -56,7 +56,7 @@ jobs:
           resource-name: service/angular-app
           show-kubectl-command: true
       # Get port and IP of service
-      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\" >> $BASH_ENV
+      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
       # Wait for service to be available
       - run: dockerize -wait tcp://localhost:5432 -timeout 1m
   testing-execute-test:
