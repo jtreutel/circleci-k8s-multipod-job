@@ -1,0 +1,14 @@
+version: 2.1
+
+jobs:
+  test-runner:
+    machine: true
+    resource_class: jtreutel/runner-test-k8s-2022
+    steps:
+      - run: echo "Hi I'm on k8s Runners!"
+
+
+workflows:
+  testing:
+    jobs:
+      - test-runner
