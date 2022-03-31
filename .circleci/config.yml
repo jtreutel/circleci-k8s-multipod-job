@@ -46,12 +46,12 @@ jobs:
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
       - kubernetes/create-or-update-resource:
-          get-rollout-status: true
+          get-rollout-status: false
           resource-file-path: deployments/angular.yml
           resource-name: deployment/angular-app
           show-kubectl-command: true
       - kubernetes/create-or-update-resource:
-          get-rollout-status: true
+          get-rollout-status: false
           resource-file-path: services/angular.yml
           resource-name: service/angular-app
           show-kubectl-command: true
