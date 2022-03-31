@@ -1,0 +1,115 @@
+version: 2.1
+
+orbs: 
+  kubernetes: circleci/kubernetes@1.3.0
+  aws-cli: circleci/aws-cli@2.1.0
+
+#Define runner executor once for use throughout the pipeline
+executors:
+  k8s-runner:
+    machine: true
+    resource_class: jtreutel/runner-test-k8s-2022
+
+commands:
+  install-dockerize:
+    steps:
+      - run: |
+          if [ ! -f "/usr/local/bin/dockerize" ]; then \
+            wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
+            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
+          fi
+
+
+jobs:
+  checkout-code:
+    # This job does not need to be run on-prem
+    docker:
+      - image: cimg/base:2022.03
+    # We are caching data generated in a cloud container and passing it to our on-prem CircleCI Runner
+    steps:
+      - checkout
+      - persist_to_workspace:
+          root: .
+          paths:
+          - .
+  testing-deploy-pod:
+    executor: k8s-runner
+    steps:
+      - attach_workspace:
+          at: .
+      # Install utilities if necessary
+      - install-dockerize
+      - aws-cli/setup:
+          profile-name: default
+      - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
+      # Deploy Angular app k8s deployment and service
+      - kubernetes/create-or-update-resource:
+          get-rollout-status: false
+          resource-file-path: deployments/angular.yml
+          resource-name: deployment/angular-app
+          show-kubectl-command: true
+      - kubernetes/create-or-update-resource:
+          get-rollout-status: false
+          resource-file-path: services/angular.yml
+          resource-name: service/angular-app
+          show-kubectl-command: true
+      # Get port and IP of service and store in BASH_ENV for use in next steps
+      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+      # Wait for service to be available
+      - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
+      # Save service IP to local file and workspace cache
+      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-angular.txt
+      - persist_to_workspace:
+          root: .
+          paths:
+          - svc_ips/*
+  testing-execute-test:
+    executor: k8s-runner
+    steps:
+      - attach_workspace:
+          at: .
+      - run: mkdir test_results
+      # Run a "test" that gets contents of Angular app running on recently deployed pod
+      - run: curl "$(cat svc_ips/svc-angular.txt)" | tee test_results/angular.txt
+      # Upload test result to CircleCI UI
+      - store_artifacts:
+          path: test_results/angular.txt
+          destination: curl-angular-results.txt
+
+  testing-delete-pod:
+    executor: k8s-runner
+    steps:
+      # Install utilities if necessaryzs
+      - aws-cli/setup:
+          profile-name: default
+      - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
+      # Clean up deployed resources
+      - kubernetes/delete-resource:
+          now: true
+          resource-names: angular-app
+          resource-types: deployments
+          wait: true
+      - kubernetes/delete-resource:
+          now: true
+          resource-names: angular-app
+          resource-types: service
+          wait: true
+
+workflows:
+  testing:
+    jobs:
+      - checkout-code
+      - testing-deploy-pod:
+          requires:
+            - checkout-code
+          context: kubeconfig
+      - testing-execute-test:
+          requires:
+            - testing-deploy-pod
+          context: kubeconfig
+      - testing-delete-pod:
+          requires:
+            - testing-execute-test
+          context: kubeconfig       
