@@ -11,17 +11,13 @@ executors:
     resource_class: jtreutel/runner-test-k8s-2022
 
 commands:
-  install-aws-iam-authenticator:
+  install-dockerize:
     steps:
       - run: |
-          if [ ! -f "$HOME/bin/aws-iam-authenticator" ]; then \
-            curl -o aws-iam-authenticator https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.2/2021-07-05/bin/linux/amd64/aws-iam-authenticator && \
-            chmod +x ./aws-iam-authenticator && \
-            mkdir -p $HOME/bin && cp ./aws-iam-authenticator $HOME/bin/aws-iam-authenticator && export PATH=$PATH:$HOME/bin; \
+          if [ ! -f "$PWD/dockerize" ]; then \
+            curl -o https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
+            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz \
           fi
-          echo $PATH
-          which aws-iam-authenticator
-          aws-iam-authenticator
 
 
 jobs:
@@ -41,6 +37,7 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      - install-dockerize
       - aws-cli/setup:
           profile-name: default
       - kubernetes/install-kubectl
@@ -58,7 +55,7 @@ jobs:
       # Get port and IP of service
       - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
       # Wait for service to be available
-      - run: dockerize -wait tcp://localhost:5432 -timeout 1m
+      - run: dockerize -wait tcp://$SVC_PORT_AND_IP -timeout 1m
   testing-execute-test:
     executor: k8s-runner
     steps:
@@ -98,3 +95,7 @@ workflows:
           requires:
             - testing-deploy-pod
           context: kubeconfig
+      - testing-delete-pod:
+          requires:
+            - testing-execute-test
+          context: kubeconfig       
