@@ -2,6 +2,7 @@ version: 2.1
 
 orbs: 
   kubernetes: circleci/kubernetes@1.3.0
+  aws-cli: circleci/aws-cli@2.1.0
 
 #Define runner executor once for use throughout the pipeline
 executors:
@@ -40,7 +41,8 @@ jobs:
     steps:
       - attach_workspace:
           at: .
-      - install-aws-iam-authenticator #Needed to interact with EKS
+      - aws-cli/setup:
+          profile-name: default
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
       - kubernetes/create-or-update-resource:
