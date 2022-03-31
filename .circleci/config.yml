@@ -53,7 +53,7 @@ jobs:
           resource-name: service/angular-app
           show-kubectl-command: true
       # Get port and IP of service
-      - run: export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')"
+      - run: export SVC_PORT_AND_IP="$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')"
       # Wait for service to be available
       - run: dockerize -wait tcp://$SVC_PORT_AND_IP -timeout 1m
       # Save service IP to local file and workspace cache
