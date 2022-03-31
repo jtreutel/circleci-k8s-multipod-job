@@ -52,19 +52,12 @@ jobs:
           resource-file-path: services/angular.yml
           resource-name: service/angular-app
           show-kubectl-command: true
-      # Get port and IP of service
-      - run: |
-          kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'
-          kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}'
-          export SVC_PORT_AND_IP="$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')"
-          echo $SVC_PORT_AND_IP
-          echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+      # Get port and IP of service and store in BASH_ENV for use in next step
+      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
       # Wait for service to be available
-      - run: |
-          echo "dockerize -wait tcp://$SVC_PORT_AND_IP -timeout 1m"
-          dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
+      - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
       # Save service IP to local file and workspace cache
-      - run: mdir -p svc_ips && echo $SVC_PORT_AND_IP > svc-angular.txt
+      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc-angular.txt
       - persist_to_workspace:
           root: .
           paths:
