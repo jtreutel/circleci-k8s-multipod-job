@@ -58,6 +58,7 @@ jobs:
           kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}'
           export SVC_PORT_AND_IP="$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')"
           echo $SVC_PORT_AND_IP
+          echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
       # Wait for service to be available
       - run: |
           echo "dockerize -wait tcp://$SVC_PORT_AND_IP -timeout 1m"
