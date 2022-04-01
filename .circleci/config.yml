@@ -10,14 +10,11 @@ executors:
     machine: true
     resource_class: jtreutel/runner-test-k8s-2022
 
-commands:
-  install-dockerize:
-    steps:
-      - run: |
-          if [ ! -f "/usr/local/bin/dockerize" ]; then \
-            wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
-            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
-          fi
+#Define list of microservices and the k8s objects that need to be deployed for each
+matrix-params: &matrix-params
+  parameters:
+    microservice: [frontend, redis-master, redis-replica]
+    object: [deployment, service]
 
 
 jobs:
@@ -34,36 +31,46 @@ jobs:
           - .
   deploy-apps-to-cluster:
     parameters:
-      # Name of deployment and service that will be created
-      app: 
+      # Name of microservice and object that will be deployed
+      microservice: 
+        type: string
+      object:
         type: string
     executor: k8s-runner
     steps:
       - attach_workspace:
           at: .
       # Install utilities if necessary
-      - install-dockerize
       - aws-cli/setup:
           profile-name: default
       - kubernetes/install-kubectl
       - kubernetes/install-kubeconfig
-      # Deploy app k8s deployment and service
+      # Deploy k8s object
       - kubernetes/create-or-update-resource:
-          get-rollout-status: false
-          resource-file-path: deployments/<< parameters.app >>.yml
-          resource-name: deployment/<< parameters.app >>-app
+          get-rollout-status: false #doesn't work with services
+          resource-file-path: manifests/<< parameters.microservice >>-<< parameters.object >>.yml
+          resource-name: << parameters.object >>/<< parameters.microservice >>
           show-kubectl-command: true
-      - kubernetes/create-or-update-resource:
-          get-rollout-status: false
-          resource-file-path: services/<< parameters.app >>.yml
-          resource-name: service/<< parameters.app >>-app
-          show-kubectl-command: true
+      - run: 
+          name: Get port and IP of service and store in BASH_ENV for use in next steps
+          command: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+      # Wait for service to become available (only run this on jobs that deploy a service)
       # Get port and IP of service and store in BASH_ENV for use in next steps
-      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.app >>-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.app >>-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
-      # Wait for service to be available
-      - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
-      # Save service IP to local file and workspace cache
-      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-<< parameters.app >>.txt
+      - run:
+          name: Get port and IP of service and store in BASH_ENV for use in next steps
+          command: |
+            if [ "<< parameters.object >>" == "service" ]; then \
+              echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV;
+            fi
+      - run: |
+          if [ "<< parameters.object >>" == "service" ]; then \
+            if [ ! -f "/usr/local/bin/dockerize" ]; then \
+              wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
+              sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
+            fi
+            dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m;
+            mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-<< parameters.microservice >>.txt
+          fi
       - persist_to_workspace:
           root: .
           paths:
@@ -76,7 +83,7 @@ jobs:
           at: .
       - run: mkdir test_results
       # Run a "test" that gets contents of Angular app running on recently deployed pod
-      - run: curl "$(cat svc_ips/svc-angular.txt)" | tee test_results/angular.txt
+      - run: curl "$(cat svc_ips/svc-frontend.txt)" | tee test_results/angular.txt
       # Upload test result to CircleCI UI
       - store_artifacts:
           path: test_results/angular.txt
@@ -84,8 +91,10 @@ jobs:
 
   delete-apps-from-cluster:
     parameters:
-      # Name of deployment and service that will be deleted
-      app: 
+      # Name of microservice and object that will be deployed
+      microservice: 
+        type: string
+      object:
         type: string
     executor: k8s-runner
     steps:
@@ -97,13 +106,8 @@ jobs:
       # Clean up deployed resources
       - kubernetes/delete-resource:
           now: true
-          resource-names: << parameters.app >>-app
-          resource-types: deployments
-          wait: true
-      - kubernetes/delete-resource:
-          now: true
-          resource-names: << parameters.app >>-app
-          resource-types: service
+          resource-names: << parameters.microservice >>
+          resource-types: << parameters.object >>
           wait: true
 
 workflows:
@@ -112,18 +116,21 @@ workflows:
       - checkout-code
       - deploy-apps-to-cluster:
           matrix:
-            parameters:
-              app: [angular, nginx]
+            <<: *matrix-params
           requires:
             - checkout-code
           context: kubeconfig       
       - execute-tests:
           requires:
             - deploy-apps-to-cluster
-      - delete-apps-from-cluster:
-          matrix:
-            parameters:
-              app: [angular, nginx]
+      - manual-approval:
+          type: approval
           requires:
             - execute-tests
+      - delete-apps-from-cluster:
+          matrix:
+            <<: *matrix-params
+          requires:
+            - manual-approval
+            #- execute-tests
           context: kubeconfig       
