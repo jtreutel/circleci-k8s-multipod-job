@@ -141,16 +141,11 @@ workflows:
           requires:
             - deploy
           context: kubeconfig       
-      - manual-approval:
-          type: approval
-          requires:
-            - execute-tests
       - delete:
           matrix:
             <<: *matrix-params
           requires:
-            - manual-approval
-            #- execute-tests
+            - execute-tests
           context: kubeconfig       
       - delete-temporary-namespace:
           requires:
