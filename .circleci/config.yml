@@ -16,6 +16,15 @@ matrix-params: &matrix-params
     microservice: [frontend, redis-master, redis-replica]
     object: [deployment, service]
 
+commands:
+  prereqs:
+    steps:
+      - attach_workspace:
+          at: .
+      - aws-cli/setup:
+          profile-name: default
+      - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
 
 jobs:
   checkout-code:
@@ -29,7 +38,14 @@ jobs:
           root: .
           paths:
           - .
-  deploy-apps-to-cluster:
+  create-temporary-namespace:
+    executor: k8s-runner
+    steps:
+      - prereqs
+      - run:
+          name: Create temporary namespace 
+          command: kubectl create namespace "circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1"
+  deploy:
     parameters:
       # Name of microservice and object that will be deployed
       microservice: 
@@ -38,58 +54,48 @@ jobs:
         type: string
     executor: k8s-runner
     steps:
-      - attach_workspace:
-          at: .
-      # Install utilities if necessary
-      - aws-cli/setup:
-          profile-name: default
-      - kubernetes/install-kubectl
-      - kubernetes/install-kubeconfig
+      - prereqs
       # Deploy k8s object
       - kubernetes/create-or-update-resource:
           get-rollout-status: false #doesn't work with services
           resource-file-path: manifests/<< parameters.microservice >>-<< parameters.object >>.yaml
           resource-name: << parameters.object >>/<< parameters.microservice >>
           show-kubectl-command: true
+          namespace: circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1
       - run: 
           name: Get port and IP of service and store in BASH_ENV for use in next steps
-          command: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
+          command: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}' -n circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1)\"" >> $BASH_ENV
       # Wait for service to become available (only run this on jobs that deploy a service)
       # Get port and IP of service and store in BASH_ENV for use in next steps
       - run:
-          name: Get port and IP of service and store in BASH_ENV for use in next steps
+          name: Check if service is running
           command: |
             if [ "<< parameters.object >>" == "service" ]; then \
-              echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV;
+              if [ ! -f "/usr/local/bin/dockerize" ]; then \
+                wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
+                sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
+              fi \
+              export SVC_PORT_AND_IP="$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')" && \
+              dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m; \
+            else \
+              echo "Object is not a service, skipping."; \
             fi
-      - run: |
-          if [ "<< parameters.object >>" == "service" ]; then \
-            if [ ! -f "/usr/local/bin/dockerize" ]; then \
-              wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
-              sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
-            fi
-            dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m;
-            mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-<< parameters.microservice >>.txt
-          fi
-      - persist_to_workspace:
-          root: .
-          paths:
-          - svc_ips/*
 
   execute-tests:
     executor: k8s-runner
     steps:
-      - attach_workspace:
-          at: .
+      - prereqs
       - run: mkdir test_results
       # Run a "test" that gets contents of Angular app running on recently deployed pod
-      - run: curl "$(cat svc_ips/svc-frontend.txt)" | tee test_results/angular.txt
+      - run: |
+          export SVC_PORT_AND_IP="$(kubectl get svc frontend -o=jsonpath='{.spec.clusterIP}' -n circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1):$(kubectl get svc frontend -o=jsonpath='{.spec.ports[0].port}' -n circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1)"; \
+          curl "$SVC_PORT_AND_IP" | tee test_results/frontend.txt
       # Upload test result to CircleCI UI
       - store_artifacts:
-          path: test_results/angular.txt
-          destination: curl-angular-results.txt
+          path: test_results/frontend.txt
+          destination: curl-frontend-results.txt
 
-  delete-apps-from-cluster:
+  delete:
     parameters:
       # Name of microservice and object that will be deployed
       microservice: 
@@ -98,39 +104,54 @@ jobs:
         type: string
     executor: k8s-runner
     steps:
-      # Install utilities if necessaryzs
-      - aws-cli/setup:
-          profile-name: default
-      - kubernetes/install-kubectl
-      - kubernetes/install-kubeconfig
+      - prereqs
       # Clean up deployed resources
       - kubernetes/delete-resource:
           now: true
           resource-names: << parameters.microservice >>
           resource-types: << parameters.object >>
           wait: true
+          namespace: circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1
+
+  #Technically we can do all the cleanup with just this job
+  delete-temporary-namespace:
+    executor: k8s-runner
+    steps:
+      - prereqs
+      - run:
+          name: Delete temporary namespace 
+          command: kubectl delete namespace "circleci-$CIRCLE_PROJECT_REPONAME-$CIRCLE_SHA1"
+          
 
 workflows:
   testing:
     jobs:
       - checkout-code
-      - deploy-apps-to-cluster:
-          matrix:
-            <<: *matrix-params
+      - create-temporary-namespace:
           requires:
             - checkout-code
           context: kubeconfig       
+      - deploy:
+          matrix:
+            <<: *matrix-params
+          requires:
+            - create-temporary-namespace
+          context: kubeconfig       
       - execute-tests:
           requires:
-            - deploy-apps-to-cluster
+            - deploy
       - manual-approval:
           type: approval
           requires:
             - execute-tests
-      - delete-apps-from-cluster:
+      - delete:
           matrix:
             <<: *matrix-params
           requires:
             - manual-approval
             #- execute-tests
+          context: kubeconfig       
+      - delete-temporary-namespace:
+          requires:
+            - delete
           context: kubeconfig       
