@@ -8,6 +8,7 @@ Here's what's happening in this example:
 - Existing AWS EKS cluster
 - Existing Runners on pods in my k8s cluster (see [these instructions](https://circleci.com/docs/2.0/runner-on-kubernetes/)).
 - kubeconfig file [base64 encoded](https://support.circleci.com/hc/en-us/articles/360003540393-How-to-insert-files-as-environment-variables-with-Base64) and stored in a [context](https://circleci.com/docs/2.0/contexts/) so that I could use the [CircleCI kubernetes orb](https://circleci.com/developer/orbs/orb/circleci/kubernetes#commands-install-kubeconfig).
+- Pulled a sample app, Guestbook, from the [Kuberenetes sample app repo](https://github.com/kubernetes/examples).
 
 ### Pipeline jobs
 
