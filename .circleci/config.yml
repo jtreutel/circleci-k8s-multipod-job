@@ -48,7 +48,7 @@ jobs:
       # Deploy k8s object
       - kubernetes/create-or-update-resource:
           get-rollout-status: false #doesn't work with services
-          resource-file-path: manifests/<< parameters.microservice >>-<< parameters.object >>.yml
+          resource-file-path: manifests/<< parameters.microservice >>-<< parameters.object >>.yaml
           resource-name: << parameters.object >>/<< parameters.microservice >>
           show-kubectl-command: true
       - run: 
