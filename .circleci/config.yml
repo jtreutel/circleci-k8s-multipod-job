@@ -10,15 +10,21 @@ executors:
     machine: true
     resource_class: jtreutel/runner-test-k8s-2022
 
-commands:
-  install-dockerize:
-    steps:
-      - run: |
-          if [ ! -f "/usr/local/bin/dockerize" ]; then \
-            wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
-            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
-          fi
+#Define list of microservices and the k8s objects that need to be deployed for each
+matrix-params: &matrix-params
+  parameters:
+    microservice: [frontend, redis-master, redis-replica]
+    object: [deployment, service]
 
+commands:
+  prereqs:
+    steps:
+      - attach_workspace:
+          at: .
+      - aws-cli/setup:
+          profile-name: default
+      - kubernetes/install-kubectl
+      - kubernetes/install-kubeconfig
 
 jobs:
   checkout-code:
@@ -32,84 +38,116 @@ jobs:
           root: .
           paths:
           - .
-  testing-deploy-pod:
+  create-temporary-namespace:
     executor: k8s-runner
     steps:
-      - attach_workspace:
-          at: .
-      # Install utilities if necessary
-      - install-dockerize
-      - aws-cli/setup:
-          profile-name: default
-      - kubernetes/install-kubectl
-      - kubernetes/install-kubeconfig
-      # Deploy Angular app k8s deployment and service
+      - prereqs
+      - run:
+          name: Create temporary namespace 
+          command: kubectl create namespace "circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7}"
+  deploy:
+    parameters:
+      # Name of microservice and object that will be deployed
+      microservice: 
+        type: string
+      object:
+        type: string
+    executor: k8s-runner
+    steps:
+      - prereqs
+      # Deploy k8s object
       - kubernetes/create-or-update-resource:
-          get-rollout-status: false
-          resource-file-path: deployments/angular.yml
-          resource-name: deployment/angular-app
+          get-rollout-status: false #doesn't work with services
+          resource-file-path: manifests/<< parameters.microservice >>-<< parameters.object >>.yaml
+          resource-name: << parameters.object >>/<< parameters.microservice >>
           show-kubectl-command: true
-      - kubernetes/create-or-update-resource:
-          get-rollout-status: false
-          resource-file-path: services/angular.yml
-          resource-name: service/angular-app
-          show-kubectl-command: true
+          namespace: circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7}
+      - run: 
+          name: Get port and IP of service and store in BASH_ENV for use in next steps
+          command: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}' -n circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7})\"" >> $BASH_ENV
+      # Wait for service to become available (only run this on jobs that deploy a service)
       # Get port and IP of service and store in BASH_ENV for use in next steps
-      - run: echo "export SVC_PORT_AND_IP=\"$(kubectl get svc angular-app -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc angular-app -o=jsonpath='{.spec.ports[0].port}')\"" >> $BASH_ENV
-      # Wait for service to be available
-      - run: dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m
-      # Save service IP to local file and workspace cache
-      - run: mkdir -p svc_ips && echo $SVC_PORT_AND_IP > svc_ips/svc-angular.txt
-      - persist_to_workspace:
-          root: .
-          paths:
-          - svc_ips/*
-  testing-execute-test:
+      - run:
+          name: Check if service is running
+          command: |
+            if [ "<< parameters.object >>" == "service" ]; then \
+              if [ ! -f "/usr/local/bin/dockerize" ]; then \
+                wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
+                sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
+              fi; \
+              export SVC_PORT_AND_IP="$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')" && \
+              dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m; \
+            else \
+              echo "Object is not a service, skipping."; \
+            fi
+
+  execute-tests:
     executor: k8s-runner
     steps:
-      - attach_workspace:
-          at: .
+      - prereqs
       - run: mkdir test_results
-      # Run a "test" that gets contents of Angular app running on recently deployed pod
-      - run: curl "$(cat svc_ips/svc-angular.txt)" | tee test_results/angular.txt
+      # Run a "test" that gets contents of recently deployed frontend's webpage
+      - run: |
+          export SVC_PORT_AND_IP="$(kubectl get svc frontend -o=jsonpath='{.spec.clusterIP}' -n circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7}):$(kubectl get svc frontend -o=jsonpath='{.spec.ports[0].port}' -n circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7})"; \
+          curl "$SVC_PORT_AND_IP" | tee test_results/frontend.txt
       # Upload test result to CircleCI UI
       - store_artifacts:
-          path: test_results/angular.txt
-          destination: curl-angular-results.txt
+          path: test_results/frontend.txt
+          destination: curl-frontend-results.txt
 
-  testing-delete-pod:
+  delete:
+    parameters:
+      # Name of microservice and object that will be deployed
+      microservice: 
+        type: string
+      object:
+        type: string
     executor: k8s-runner
     steps:
-      # Install utilities if necessaryzs
-      - aws-cli/setup:
-          profile-name: default
-      - kubernetes/install-kubectl
-      - kubernetes/install-kubeconfig
+      - prereqs
       # Clean up deployed resources
       - kubernetes/delete-resource:
           now: true
-          resource-names: angular-app
-          resource-types: deployments
+          resource-names: << parameters.microservice >>
+          resource-types: << parameters.object >>
           wait: true
-      - kubernetes/delete-resource:
-          now: true
-          resource-names: angular-app
-          resource-types: service
-          wait: true
+          namespace: circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7}
+
+  #Technically we can do all the cleanup with just this job
+  delete-temporary-namespace:
+    executor: k8s-runner
+    steps:
+      - prereqs
+      - run:
+          name: Delete temporary namespace 
+          command: kubectl delete namespace "circleci-${CIRCLE_PROJECT_REPONAME}-${CIRCLE_SHA1:0:7}"
+          
 
 workflows:
   testing:
     jobs:
       - checkout-code
-      - testing-deploy-pod:
+      - create-temporary-namespace:
           requires:
             - checkout-code
-          context: kubeconfig
-      - testing-execute-test:
+          context: kubeconfig       
+      - deploy:
+          matrix:
+            <<: *matrix-params
           requires:
-            - testing-deploy-pod
-          context: kubeconfig
-      - testing-delete-pod:
+            - create-temporary-namespace
+          context: kubeconfig       
+      - execute-tests:
           requires:
-            - testing-execute-test
+            - deploy
+          context: kubeconfig       
+      - delete:
+          matrix:
+            <<: *matrix-params
+          requires:
+            - execute-tests
+          context: kubeconfig       
+      - delete-temporary-namespace:
+          requires:
+            - delete
           context: kubeconfig       
