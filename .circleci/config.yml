@@ -74,7 +74,7 @@ jobs:
               if [ ! -f "/usr/local/bin/dockerize" ]; then \
                 wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz && \
                 sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz && rm dockerize-linux-amd64-v0.6.1.tar.gz; \
-              fi \
+              fi; \
               export SVC_PORT_AND_IP="$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.clusterIP}'):$(kubectl get svc << parameters.microservice >> -o=jsonpath='{.spec.ports[0].port}')" && \
               dockerize -wait "tcp://$SVC_PORT_AND_IP" -timeout 1m; \
             else \
